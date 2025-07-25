@@ -4,8 +4,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 
-SENDER_EMAIL = os.environ["email"]["sender"]  # <-- replace with your Gmail
-APP_PASSWORD = os.environ["email"]["password"]    # <-- replace with your App Password
+SENDER_EMAIL = os.environ["EMAIL_SENDER"]  # <-- replace with your Gmail
+APP_PASSWORD = os.environ["EMAIL_PASSWORD"]    # <-- replace with your App Password
 
 def send_recruiter_notification(to_email, job_title, candidate_name, message, resume_bytes=None, resume_filename="resume.pdf"):
     subject = "New applicant for job posting"
