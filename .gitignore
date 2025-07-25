@@ -1,0 +1,10 @@
+# Ignore secrets and sensitive files
+.streamlit/secrets.toml
+
+# Python environment
+venv/
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
