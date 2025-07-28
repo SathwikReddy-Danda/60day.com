@@ -3,7 +3,7 @@ from utils.db import (
     init_db, init_applications_db, create_user_table, add_user,
     get_user_by_username, make_hash, add_job, get_jobs, apply_to_job,
     get_jobs_by_user, get_applications_for_recruiter, get_applications_by_candidate,
-    get_skills_for_job, get_all_skills, filter_jobs, get_email_by_username
+    get_skills_for_job, get_all_skills, filter_jobs, get_email_by_username, save_skills_for_job
 )
 from utils.email_utils import send_recruiter_notification
 import sqlite3
@@ -17,7 +17,7 @@ create_user_table()
 
 st.set_page_config(page_title="60day.com", layout="centered", initial_sidebar_state="collapsed")
 
-# Global dark theme visibility fix
+# Dark theme fix
 st.markdown("""
     <style>
     .st-expanderContent {
@@ -33,21 +33,19 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
+# Session state
 if "username" not in st.session_state:
     st.session_state["username"] = None
 if "user_role" not in st.session_state:
     st.session_state["user_role"] = None
 
-# ---------- AUTH SCREENS (Login / Signup) ----------
-
+# ----------- AUTH SCREENS -----------
 def show_login():
     st.title("🔐 Login")
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         submit = st.form_submit_button("Login")
-
         if submit and username and password:
             user_record = get_user_by_username(username)
             if user_record:
@@ -70,7 +68,6 @@ def show_signup():
         email = st.text_input("Email Address")
         role = st.radio("Register as:", ["recruiter", "candidate"])
         submit = st.form_submit_button("Create Account")
-
         if submit and username and password and email:
             try:
                 add_user(username, password, role, email)
@@ -78,7 +75,7 @@ def show_signup():
             except Exception as e:
                 st.error(f"Error: {e}")
 
-# ---------- DASHBOARD SCREENS ----------
+# ----------- RECRUITER VIEWS -----------
 
 def show_recruiter_post_form():
     st.header("📢 Post a Job")
@@ -91,17 +88,22 @@ def show_recruiter_post_form():
         remote = st.selectbox("Remote Option", ["Yes", "No"])
         salary = st.text_input("Salary Range (e.g. 90K–110K)")
         skills = st.text_input("Key Skills (comma-separated)")
+        grace60 = st.selectbox("Open to 60-Day Grace Period Candidates?", ["Yes", "No"])
         post = st.form_submit_button("Post Job")
 
         if post and title and description and location and salary:
             conn = sqlite3.connect("data/jobs.db")
             c = conn.cursor()
             c.execute('''
-                INSERT INTO jobs (title, description, location, visa_sponsorship, urgency, posted_by, timestamp, remote, salary_range, skills)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
-            ''', (title, description, location, visa, urgency, st.session_state.username, remote, salary, skills))
+                INSERT INTO jobs (title, description, location, visa_sponsorship, urgency, posted_by, timestamp, remote, salary_range, skills, grace_60)
+                VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?)
+            ''', (title, description, location, visa, urgency, st.session_state.username, remote, salary, skills, grace60))
+            job_id = c.lastrowid  # <-- get the ID of the newly inserted job
             conn.commit()
             conn.close()
+
+            # Save the skills in the skills & job_skills table
+            save_skills_for_job(job_id, skills.split(","))
             st.success("✅ Job posted!")
 
 def show_recruiter_jobs():
@@ -118,6 +120,7 @@ def show_recruiter_jobs():
             **Posted By:** {job[6]}  
             **Remote Option:** {job[8]}  
             **Salary Range:** {job[9]}  
+            **Grace Period Friendly:** {job[11]}  
             **Skills:** {get_skills_for_job(job[0]) or 'N/A'}
             """)
 
@@ -144,9 +147,10 @@ def show_recruiter_applications():
                     with open(resume_path, "rb") as f:
                         st.download_button("📄 Download Resume", data=f, file_name=f"resume_{candidate}.pdf")
 
+# ----------- CANDIDATE VIEWS -----------
+
 def show_candidate_jobs():
     st.header("💼 Available Jobs")
-
     applied_job_ids = {app[0] for app in get_applications_by_candidate(st.session_state.username)}
 
     with st.expander("🔍 Filter Jobs"):
@@ -157,6 +161,7 @@ def show_candidate_jobs():
         remote = st.selectbox("Remote Option", ["All", "Yes", "No"])
         visa = st.selectbox("Visa Sponsorship", ["All", "Yes", "No"])
         urgency = st.selectbox("Urgency", ["All", "Immediate", "Within 30 Days", "Flexible"])
+        grace60 = st.selectbox("60-Day Grace Period Friendly", ["All", "Yes", "No"])
         search = st.button("Apply Filters")
 
     if search:
@@ -166,7 +171,8 @@ def show_candidate_jobs():
             remote=remote,
             visa=visa,
             urgency=urgency,
-            title=title
+            title=title,
+            grace60=grace60
         )
     else:
         jobs = get_jobs()
@@ -184,6 +190,7 @@ def show_candidate_jobs():
             **Posted By:** {job[6]}  
             **Remote Option:** {job[8]}  
             **Salary Range:** {job[9]}  
+            **60-Day Grace Period Friendly:** {job[10]}  
             **Skills:** {get_skills_for_job(job[0]) or 'N/A'}
             """)
             if st.button(f"Apply for {job[1]}", key=f"applybtn_{job[0]}"):
@@ -199,7 +206,6 @@ def show_candidate_jobs():
                     if submitted:
                         resume_bytes = resume.read() if resume else None
                         apply_to_job(job[0], st.session_state.username, message, resume_bytes, first, last, email, phone)
-
                         recruiter_email = get_email_by_username(job[6])
                         candidate_name = f"{first} {last}"
                         send_recruiter_notification(
@@ -210,7 +216,6 @@ def show_candidate_jobs():
                             resume_bytes=resume_bytes,
                             resume_filename=resume.name if resume else "resume.pdf"
                         )
-
                         st.success("✅ Application submitted!")
                         st.rerun()
 
@@ -227,10 +232,11 @@ def show_candidate_applications():
         **Posted By:** {app[6]}  
         **Remote Option:** {app[8]}  
         **Salary Range:** {app[9]}  
+        **Grace Period Friendly:** {app[10]}  
         **Your Message:** {app[10]}
         """)
 
-# ---------- APP FLOW ----------
+# ----------- APP FLOW -----------
 
 def logout():
     st.session_state.username = None

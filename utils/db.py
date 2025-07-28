@@ -143,7 +143,7 @@ def get_skills_for_job(job_id):
     conn.close()
     return ", ".join(result)
 
-def filter_jobs(skill=None, location=None, remote=None, visa=None, urgency=None, title=None):
+def filter_jobs(skill=None, location=None, remote=None, visa=None, urgency=None, title=None, grace60=None):
     conn = sqlite3.connect("data/jobs.db")
     c = conn.cursor()
 
@@ -174,6 +174,9 @@ def filter_jobs(skill=None, location=None, remote=None, visa=None, urgency=None,
     if title:
         query += " AND jobs.title LIKE ?"
         params.append(f"%{title}%")
+    if grace60 and grace60 != "All":
+        query += " AND jobs.grace_60 = ?"
+        params.append(grace60)
 
     query += " ORDER BY jobs.timestamp DESC"
 
@@ -181,6 +184,7 @@ def filter_jobs(skill=None, location=None, remote=None, visa=None, urgency=None,
     results = c.fetchall()
     conn.close()
     return results
+
 
 
 def get_all_skills():
@@ -209,3 +213,26 @@ def get_email_by_username(username):
     result = c.fetchone()
     conn.close()
     return result[0] if result else None
+
+def save_skills_for_job(job_id, skills_list):
+    conn = sqlite3.connect("data/jobs.db")
+    c = conn.cursor()
+
+    for skill in skills_list:
+        skill = skill.strip()
+        c.execute("SELECT id FROM skills WHERE name = ?", (skill,))
+        result = c.fetchone()
+
+        if result:
+            skill_id = result[0]
+        else:
+            c.execute("INSERT INTO skills (name) VALUES (?)", (skill,))
+            skill_id = c.lastrowid
+
+        # Check if the link already exists
+        c.execute("SELECT 1 FROM job_skills WHERE job_id = ? AND skill_id = ?", (job_id, skill_id))
+        if not c.fetchone():
+            c.execute("INSERT INTO job_skills (job_id, skill_id) VALUES (?, ?)", (job_id, skill_id))
+
+    conn.commit()
+    conn.close()
